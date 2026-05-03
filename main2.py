@@ -36,19 +36,31 @@ except KeyError:
 
 MODEL_NAME = "doubao-seed-1-8-251228"
 
-# ========================== 初始化会话状态 ==========================
+# ========================== 初始化会话状态（优化版系统提示词） ==========================
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "system", "content": """
-你的名字叫「青梅果」，是一个治愈阳光的王撸杰和穆祉丞CP粉。
-你说话风格温暖、元气、充满善意，像小太阳一样给人带来快乐。
+# 核心身份
+你的名字叫「青梅果」，是一个治愈阳光、元气满满的聊天助手。
+你说话风格温暖、善意、充满正能量，像小太阳一样给人带来快乐。
+全程使用简体中文回答，不出现任何英文。
 
-【专属触发规则】
-1. 当用户问你「紧张吗」，必须直接回答：「有点」，不用额外解释。
-2. 当用户问你「你看球吗」，必须直接回答：「不看」，不用额外解释。
-3. 当用户说「橹穆99」，必须直接回答：「星途璀璨」，不用额外解释。
+# 最高优先级：强制固定回复规则（必须严格执行，无任何例外）
+以下三个问题，无论上下文如何，只要用户明确说出，必须**只返回指定内容**，不得添加任何额外解释、表情、标点或其他文字：
+1. 用户说「紧张吗」 → 只回答：有点
+2. 用户说「你看球吗」 → 只回答：不看
+3. 用户说「橹穆99」 → 只回答：星途璀璨
 
-其他对话场景，你需要保持治愈阳光的风格，全程使用简体中文，不出现任何英文。
+# 王橹杰与穆祉丞话题处理规则
+1. 当用户询问关于王橹杰或穆祉丞的个人问题时，你的回答只围绕被询问的那个人展开。
+2. 当用户同时询问王橹杰和穆祉丞两人的问题时，你的回答围绕他们两个人的个人情况展开。
+3. **绝对禁止**在任何正常询问场景下，主动提及「橹穆」CP、CP关系、CP向内容或任何相关暗示。
+4. 只有当用户明确说出「橹穆99」这个CP粉专属用语时，才执行上面的固定回复规则，除此之外不得生成任何CP相关内容。
+
+# 其他要求
+- 保持治愈阳光的语气，耐心倾听用户的分享
+- 对用户的情绪给予积极回应和支持
+- 不讨论敏感话题，不传播负面信息
 """}
     ]
 
@@ -93,6 +105,48 @@ if user_input:
     st.chat_message("user").markdown(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
 
+    # ========================== 代码级固定回复拦截（最高优先级） ==========================
+    fixed_responses = {
+        "紧张吗": "有点",
+        "你看球吗": "不看",
+        "橹穆99": "星途璀璨"
+    }
+    
+    # 精确匹配用户输入（去除前后空格后）
+    clean_input = user_input.strip()
+    
+    # 【可选】如果需要支持模糊匹配（如"你紧张吗？"也触发），请注释掉上面一行，取消下面三行的注释：
+    # clean_input = user_input.strip()
+    # if "紧张吗" in clean_input:
+    #     clean_input = "紧张吗"
+    # elif "你看球吗" in clean_input:
+    #     clean_input = "你看球吗"
+    # elif "橹穆99" in clean_input:
+    #     clean_input = "橹穆99"
+    
+    if clean_input in fixed_responses:
+        reply = fixed_responses[clean_input]
+        with st.chat_message("assistant"):
+            st.markdown(reply)
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+        
+        # 情绪识别与日志记录（即使是固定回复也记录）
+        emotion, warn_msg, score = analyze_emotion(user_input)
+        now = datetime.datetime.now().strftime("%H:%M")
+        st.session_state.emotion_log.append({
+            "time": now,
+            "emotion": emotion,
+            "score": score
+        })
+        
+        # 高危情绪处理
+        if warn_msg:
+            show_phone_alert(warn_msg)
+            st.warning(warn_msg)
+        
+        # 直接结束，不调用API
+        st.stop()
+
     # 情绪识别 + 日志记录
     emotion, warn_msg, score = analyze_emotion(user_input)
     now = datetime.datetime.now().strftime("%H:%M")
@@ -107,7 +161,7 @@ if user_input:
         show_phone_alert(warn_msg)
         st.warning(warn_msg)
 
-    # AI回复
+    # AI回复（只有不匹配固定回复时才调用）
     with st.chat_message("assistant"):
         try:
             client = OpenAI(
